@@ -59,4 +59,10 @@
 #   define ZF_RGBDUMP(x, y)            do {} while(0)
 #endif
 
+#   ifndef ZF_PRINT
+#       define ZF_PRINT(x...)                 do { \
+            printf(x); printf("\n"); \
+        } while(0)
+#   endif
+
 #endif /* __ZFCFG_H__ */
