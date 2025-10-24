@@ -133,7 +133,6 @@ void zf_log(const uint8_t *font)
 
     ZF_PRINT("");
     ZF_PRINT("Font size: %d", header->size);
-    ZF_PRINT("Font cap height: %d", header->cap_height);
     ZF_PRINT("Font ascent: %d", header->ascent);
     ZF_PRINT("Font descent: %d", header->descent);
     ZF_PRINT("Font bounding box: left=%d, bottom=%d, width=%d, height=%d",
@@ -153,7 +152,7 @@ void zf_log(const uint8_t *font)
 int zf_get_font_height(const uint8_t *font)
 {
     const zf_font_header_t *header = (const zf_font_header_t *)font;
-    return header->ascent;
+    return header->ascent + header->descent;
 }
 
 int zf_get_glyph(const uint8_t *font, zf_codepoint_t codepoint, zf_glyph_ctx_t *g)
@@ -161,13 +160,15 @@ int zf_get_glyph(const uint8_t *font, zf_codepoint_t codepoint, zf_glyph_ctx_t *
     const zf_font_header_t *header = (const zf_font_header_t *)font;
 
     const uint8_t *block_cur, *glyph=NULL, *glyph_end;
-    int blk_l, blk_cp_cnt, blk_cp, blk_cp_max, glyph_code, glyph_l;
+    int blk_l, blk_cp_min, blk_cp_max, glyph_code, glyph_l, glyph_oft;
     int value, black_value, white_value, run_length;
 
     int repeat_length, repeat_num, repeat_index;
     zf_bs_t repeat_bs;
 
     int pixel, total_pixels, target_pixel;
+
+    bool block_not_continuous;
 
     black_value = 0;
     white_value = (1 << header->glyph_pixel_bitnum) - 1;
@@ -178,23 +179,35 @@ int zf_get_glyph(const uint8_t *font, zf_codepoint_t codepoint, zf_glyph_ctx_t *
         if (blk_l == 0) {
             break;
         }
-        blk_cp_cnt = zf_read_variable(&block_cur);
-        blk_cp = zf_read_variable(&block_cur);
-        blk_cp_max = blk_cp + blk_cp_cnt - 1;
+        blk_cp_min = zf_read_variable(&block_cur);
+        blk_cp_max = zf_read_variable(&block_cur);
+        block_not_continuous = blk_cp_max & 0x1;
+        blk_cp_max = blk_cp_max >> 1;
 
-        ZF_LOG("Block: length=%d, codepoint_count=%d, first_codepoint=0x%04X", blk_l, blk_cp_cnt, blk_cp);
+        ZF_LOG("Block: length=%d,  first_codepoint=0x%04X last_codepoint=0x%04X", blk_l, blk_cp_min, blk_cp_max);
 
-        if ((codepoint >= blk_cp) && (codepoint <= blk_cp_max)) {
+        if ((codepoint >= blk_cp_min) && (codepoint <= blk_cp_max)) {
             /* block matched */
             glyph = block_cur;
             glyph_end = block_cur + blk_l;
-            glyph_code = blk_cp;
+            if (block_not_continuous) {
+                glyph_code = blk_cp_min;
+            } else {
+                glyph_code = blk_cp_min - 1;
+            }
 
             ZF_LOG("Glyph block data:");
             ZF_HEXDUMP(glyph, glyph_end - glyph);
 
             while (glyph < glyph_end) {
                 glyph_l = zf_read_variable(&glyph);
+                if (block_not_continuous) {
+                    glyph_oft = zf_read_variable(&glyph);
+                } else {
+                    glyph_oft = 1;
+                }
+                glyph_code += glyph_oft;
+
                 ZF_LOG("Glyph: length=%d, codepoint=0x%04X", glyph_l, glyph_code);
 
                 if (glyph_code == codepoint) {
@@ -239,7 +252,6 @@ int zf_get_glyph(const uint8_t *font, zf_codepoint_t codepoint, zf_glyph_ctx_t *
                 }
 
                 glyph += glyph_l;
-                glyph_code++;
             }
         }
 
@@ -331,7 +343,7 @@ int zf_get_pixel_from_glyph_with_box(zf_glyph_ctx_t *ctx, int xp, int yp, int x,
     int xoft, yoft;
 
     xl = x;
-    yl = y + ctx->font->cap_height + 1;
+    yl = y + ctx->font->ascent;
 
     xg = xl + ctx->info.left;
     yg = yl - ctx->info.bottom - ctx->info.height;
@@ -390,203 +402,3 @@ int zf_get_glyph_by_text(const uint8_t *font, const char *text, zf_glyph_ctx_t *
 
     return count;
 }
-
-
-#if 0
-
-int zf_get_pixel(const uint8_t *font, uint16_t codepoint, int x, int y)
-{
-    const zf_font_header_t *header = (const zf_font_header_t *)font;
-
-    const uint8_t *block_cur, *glyph=NULL, *glyph_end;
-    int glyph_size, blk_l, blk_cp_cnt, blk_cp, glyph_code, glyph_l;
-    int value, black_value, white_value, run_length;
-
-    int repeat_length, repeat_num, repeat_index;
-    zf_bs_t repeat_bs;
-
-    int pixel, total_pixels, target_pixel;
-
-    glyph_size = header->size - sizeof(zf_font_header_t);
-
-    block_cur = font + sizeof(zf_font_header_t);
-    while (true) {
-        blk_l = zf_read_variable(&block_cur);
-        if (blk_l == 0) {
-#if ZF_DEBUG
-            break;
-#else
-            return ZF_ERR_GLYPH_NOT_FOUND;
-#endif
-        }
-        blk_cp_cnt = zf_read_variable(&block_cur);
-        blk_cp = zf_read_variable(&block_cur);
-
-        ZF_LOG("Block: length=%d, codepoint_count=%d, first_codepoint=0x%04X",
-            blk_l, blk_cp_cnt, blk_cp);
-
-        if ((codepoint >= blk_cp) && (codepoint < blk_cp + blk_cp_cnt)) {
-            /* block matched */
-            glyph = block_cur;
-            glyph_end = block_cur + blk_l;
-            glyph_code = blk_cp;
-
-#if ZF_DEBUG == 0
-            break;
-#endif
-        }
-
-        block_cur += blk_l;
-    }
-
-    if (!glyph) {
-        return ZF_ERR_GLYPH_NOT_FOUND;
-    }
-
-    ZF_LOG("Glyph block data:");
-    ZF_HEXDUMP(glyph, glyph_end - glyph);
-
-    black_value = 0;
-    white_value = (1 << header->glyph_pixel_bitnum) - 1;
-    while (glyph < glyph_end) {
-        glyph_l = zf_read_variable(&glyph);
-        ZF_LOG("Glyph: length=%d, codepoint=0x%04X", glyph_l, glyph_code);
-
-        if (glyph_code == codepoint) {
-            /* glyph matched */
-            ZF_LOG("Glyph found for codepoint 0x%04X", codepoint);
-
-            ZF_LOG("Glyph data:");
-            ZF_HEXDUMP(glyph, glyph_l);
-
-            // 80 64 6A C7 1E CD 46 D8 1B 9B C0 EC B1 23
-
-            zf_glyph_ctx_t g;
-
-            g.bs.data = glyph;
-            g.bs.size = glyph_l;
-            g.bs.byte_index = 0;
-            g.bs.bit_index = 0;
-
-            g.info.left = zf_read_signed_bits(&g.bs, header->gbb_left_bitnum);
-            g.info.bottom = zf_read_signed_bits(&g.bs, header->gbb_bottom_bitnum);
-            g.info.width = zf_read_unsigned_bits(&g.bs, header->gbb_width_bitnum);
-            g.info.height = zf_read_unsigned_bits(&g.bs, header->gbb_height_bitnum);
-            g.info.advance = zf_read_unsigned_bits(&g.bs, header->glyph_advance_bitnum);
-
-            g.glyph_pixel_bitnum = header->glyph_pixel_bitnum;
-            g.glyph_repeat_black_bitnum = header->glyph_repeat_black_bitnum;
-            g.glyph_repeat_white_bitnum = header->glyph_repeat_white_bitnum;
-
-            ZF_LOG("Glyph bitnum: left=%d, bottom=%d, width=%d, height=%d, advance=%d",
-                header->gbb_left_bitnum,
-                header->gbb_bottom_bitnum,
-                header->gbb_width_bitnum,
-                header->gbb_height_bitnum,
-                header->glyph_advance_bitnum
-            );
-            ZF_LOG("Glyph metrics: left=%d, bottom=%d, width=%d, height=%d, advance=%d",
-                g.info.left, g.info.bottom, g.info.width, g.info.height, g.info.advance);
-
-            ZF_LOG("BS: size=%d, byte_index=%d, bit_index=%d, data=%p",
-                g.bs.size, g.bs.byte_index, g.bs.bit_index, g.bs.data);
-
-            if ( (x < 0) || (x >= g.info.width) ||
-                 (y < 0) || (y >= g.info.height) ) {
-                return 0;
-            }
-
-            pixel = 0;
-            total_pixels = g.info.width * g.info.height;
-            target_pixel = y * g.info.width + x;
-            repeat_length = 0;
-            repeat_num = 0;
-            repeat_index = 0;
-            while ((g.bs.byte_index < g.bs.size) && (pixel < total_pixels)) {
-                value = zf_read_unsigned_bits(&g.bs, g.glyph_pixel_bitnum);
-                if (value == black_value) {
-                    /* black */
-                    run_length = zf_read_rice(&g.bs, g.glyph_repeat_black_bitnum);
-                    if (run_length == 0) {
-                        /* repeat */
-                        repeat_length = zf_read_unary(&g.bs) + 2;
-                        repeat_num = zf_read_unary(&g.bs) + 2;
-
-                        repeat_index = repeat_length;
-                        repeat_bs = g.bs;
-                        continue;
-                    }
-                } else if (value == white_value) {
-                    /* white */
-                    run_length = zf_read_rice(&g.bs, g.glyph_repeat_white_bitnum);
-                    run_length += 1;
-                } else {
-                    run_length = 1;
-                    /* pixel value (only one pixel) */
-                }
-
-                pixel += run_length;
-                ZF_LOG("pixel %d/%d, value: %d, run length: %d, repeat length: %d, repeat num: %d",
-                    pixel, total_pixels, value, run_length, repeat_length, repeat_num);
-
-                if (target_pixel < pixel) {
-                    return zf_pixel_fmt(value, g.glyph_pixel_bitnum);
-                }
-
-                if (repeat_index) {
-                    repeat_index--;
-                    if (repeat_index == 0) {
-                        /* do repeat */
-                        repeat_num--;
-                        if (repeat_num) {
-                            g.bs = repeat_bs;
-                            repeat_index = repeat_length;
-                        } else {
-                            repeat_length = 0;
-                        }
-                    }
-                }
-            }
-        }
-
-        glyph += glyph_l;
-        glyph_code++;
-    }
-
-    return 0;
-}
-
-void draw_text(const Font* font, const char* text, int x0, int y0)
-{
-    int pen_x = x0;
-    int baseline_y = y0 + font->ascent; // 基线距离区域顶部的偏移
-
-    while (*text)
-    {
-        uint32_t codepoint = *text++;
-
-        Glyph* g = font_get_glyph(font, codepoint);
-        if (!g)
-            continue;
-
-        // 计算位图左上角位置（左上角坐标系）
-        int dst_x = pen_x + g->left;
-        int dst_y = baseline_y - (g->bottom + g->height);
-
-        // 绘制位图
-        for (int y = 0; y < g->height; y++)
-        {
-            for (int x = 0; x < g->width; x++)
-            {
-                uint8_t pixel = g->bitmap[y * g->width + x];
-                if (pixel > 0)
-                    putpixel(dst_x + x, dst_y + y, pixel);
-            }
-        }
-
-        // 移动笔位置
-        pen_x += g->advance;
-    }
-}
-
-#endif

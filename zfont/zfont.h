@@ -28,7 +28,6 @@ typedef uint32_t zf_codepoint_t;
 /* set pack */
 typedef struct __PACKED {
     uint32_t size;
-    int16_t cap_height;
     int16_t ascent;
     int16_t descent;
 

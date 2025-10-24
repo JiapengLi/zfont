@@ -96,7 +96,7 @@ void test3(const char *text)
     //     printf("\n");
     // }
 
-    printf("Text: \"%s\", num glyphs=%d, total width=%d, height=%d\n", text, num, w, h);
+    printf("Text: num glyphs=%d, total width=%d, height=%d, \"%s\"\n", num, w, h, text);
     for (y = 0; y < h; y++) {
         for (x = 0; x < w; x++) {
             int gi;
