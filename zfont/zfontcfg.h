@@ -65,4 +65,14 @@
         } while(0)
 #   endif
 
+#   ifndef ZF_PRINTHEXDUMP
+#       define ZF_PRINTHEXDUMP(x, y)      do { \
+            for (int i = 0; i < y; i++) { \
+                if (i && i % 16 == 0) printf("\n"); \
+                printf("%02X ", ((uint8_t*)x)[i]); \
+            } \
+            printf("\n"); \
+        } while(0)
+#   endif
+
 #endif /* __ZFCFG_H__ */

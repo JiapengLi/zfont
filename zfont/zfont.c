@@ -200,15 +200,15 @@ int zf_get_glyph(const uint8_t *font, zf_codepoint_t codepoint, zf_glyph_ctx_t *
             ZF_HEXDUMP(glyph, glyph_end - glyph);
 
             while (glyph < glyph_end) {
-                glyph_l = zf_read_variable(&glyph);
                 if (block_not_continuous) {
                     glyph_oft = zf_read_variable(&glyph);
                 } else {
                     glyph_oft = 1;
                 }
                 glyph_code += glyph_oft;
+                glyph_l = zf_read_variable(&glyph);
 
-                ZF_LOG("Glyph: length=%d, codepoint=0x%04X", glyph_l, glyph_code);
+                ZF_LOG("Glyph: oft=%d, length=%d, codepoint=0x%04X", glyph_oft, glyph_l, glyph_code);
 
                 if (glyph_code == codepoint) {
                     /* glyph matched */
@@ -394,6 +394,8 @@ int zf_get_glyph_by_text(const uint8_t *font, const char *text, zf_glyph_ctx_t *
     while (*p && (count < g_size)) {
         codepoint = zf_utf8_to_codepoint(&p);
         rc = zf_get_glyph(font, codepoint, &g[count]);
+
+        printf("UTF-8 char to codepoint:%d, 0x%04X\n", rc, codepoint);
         if (rc != ZF_OK) {
             return rc;
         }
